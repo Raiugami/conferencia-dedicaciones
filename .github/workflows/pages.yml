@@ -1,0 +1,50 @@
+name: Publicar GitHub Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_BASE_PATH: /conferencia-dedicaciones
+    steps:
+      - uses: actions/checkout@v6
+      - name: Extrair aplicação
+        run: mkdir app && tar -xzf application.tar.gz -C app
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Instalar dependências
+        working-directory: app
+        run: npm ci
+      - name: Validar
+        working-directory: app
+        run: npm test && npx tsc --noEmit
+      - name: Gerar site
+        working-directory: app
+        run: npm run build && node scripts/prepare-pages.mjs
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: app/dist/client
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publicar
+        id: deployment
+        uses: actions/deploy-pages@v4
