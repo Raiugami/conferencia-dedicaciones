@@ -2,11 +2,15 @@ name: Publicar GitHub Pages
 on:
   push:
     branches: [main]
+    paths: ['app/**', '.github/workflows/pages.yml']
+  pull_request:
+    branches: [main]
+    paths: ['app/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: github-pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   build:
@@ -15,8 +19,6 @@ jobs:
       NEXT_PUBLIC_BASE_PATH: /conferencia-dedicaciones
     steps:
       - uses: actions/checkout@v6
-      - name: Extrair aplicação
-        run: mkdir app && tar -xzf application.tar.gz -C app
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -32,10 +34,13 @@ jobs:
         working-directory: app
         run: npm run build && node scripts/prepare-pages.mjs
       - uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request'
       - uses: actions/upload-pages-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           path: app/dist/client
   deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
