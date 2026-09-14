@@ -1,12 +1,12 @@
 # Continuidade do projeto
 
 ## Objetivo e escopo
-Facilitar o fechamento mensal: conferir se cada pessoa tem 8 horas por dia útil no Dedicaciones a partir dos PDFs exportados. O Jira é conferido separadamente no próprio Jira e está fora do escopo. A aplicação é compartilhável com a gestão e não altera apontamentos no sistema original.
+Facilitar o fechamento mensal: conferir se cada pessoa tem 8 horas por dia útil no Dedicaciones a partir dos PDFs exportados. A aplicação também pode importar localmente a exportação mensal do Jira para comparar horas por pessoa e dia, sem conexão direta nem alteração nos sistemas originais. A aplicação é compartilhável com a gestão.
 
 Site: https://raiugami.github.io/conferencia-dedicaciones/
 
 ## Decisões já tomadas
-O mês deve ser selecionado e confirmado: data de impressão não comprova o período. A pessoa é identificada inicialmente pelo nome do arquivo, com edição manual. Metadados de impressão não são identidade confiável. Dias de segunda a sexta esperam 8 horas; feriados, férias e ausências exigem exceções cadastradas, sem calendário automático. Some lançamentos entre projetos e páginas em centésimos de hora. Estados SEM VALIDAR/SIN VISAR não representam falta de horas.
+O mês deve ser selecionado e confirmado: data de impressão não comprova o período. A pessoa é identificada inicialmente pelo nome do arquivo, com edição manual. Metadados de impressão não são identidade confiável. Dias de segunda a sexta esperam 8 horas; feriados, férias e ausências exigem exceções cadastradas. O calendário sugere feriados nacionais brasileiros fixos para o mês selecionado, mas só aplica a dispensa após confirmação explícita, pois a localidade da equipe pode exigir ajustes. Some lançamentos entre projetos e páginas em centésimos de hora. Estados SEM VALIDAR/SIN VISAR não representam falta de horas.
 
 PDFs em imagem usam OCR e exigem revisão humana. Dias não encontrados e formatos desconhecidos ficam pendentes. Correções manuais preservam original e justificativa. Arquivos repetidos são identificados por hash. Os limites atuais são 40 MB, 40 páginas por PDF e 200 pessoas. Leia o código para detalhes de validação e nomes duplicados.
 

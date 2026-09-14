@@ -8,6 +8,7 @@ Aplicação para conferir a soma de 8 horas em cada dia de segunda a sexta nos P
 3. Revise os dias e confirme a leitura dos PDFs em imagem comparando com o original.
 4. Registre feriados, férias e ausências como exceções. Nenhum feriado é aplicado automaticamente.
 5. Exporte o relatório HTML para a gestão; ele abre sem a aplicação e permite imprimir/salvar em PDF. O CSV contém os dias e o JSON guarda a sessão para retomar depois.
+6. Use “Importar Jira” para carregar exportações `.csv`, `.xls` ou `.xlsx` do relatório mensal. O arquivo é lido localmente e a comparação só é habilitada para o mesmo mês da conferência.
 
 Os dados permanecem apenas na memória desta aba. Salve a sessão antes de recarregar ou fechar. Os arquivos exportados contêm informações da equipe. O link da aplicação não compartilha os dados carregados em outro navegador.
 
@@ -20,7 +21,9 @@ Os dados permanecem apenas na memória desta aba. Salve a sessão antes de recar
 - Até 40 MB e 40 páginas por PDF; até 200 pessoas por sessão. Arquivos protegidos ou ilegíveis precisam ser exportados novamente.
 - Finais de semana e exceções são dispensados. Horas identificadas nesses dias continuam visíveis e fazem parte do total identificado.
 - Correções manuais alteram apenas a leitura e mantêm o valor original e o motivo. A aplicação não modifica o Dedicaciones.
+- Para meses com feriados nacionais brasileiros fixos, a aplicação exibe sugestões de calendário. Revise a localidade e use “Adicionar sugestões” para aplicá-las; dias sugeridos não são dispensados automaticamente.
 - A conferência cobre somente os arquivos recebidos; não detecta pessoas da equipe que não enviaram PDF.
+- A comparação com o Jira usa exportação local: horas no Jira e ausentes no Dedicaciones são sinalizadas para revisão de atestado, mas nunca justificadas automaticamente.
 
 ## Desenvolvimento
 Use Node.js 22.13 ou superior da série 22 e npm. Nesta máquina o Node 24 gerou uma falha no encerramento do build de vinext; o Node 22 concluiu normalmente.

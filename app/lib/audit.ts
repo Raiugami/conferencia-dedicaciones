@@ -1,8 +1,14 @@
 export type Day = { day:number; weekday:number; cents:number|null; entries:number[]; evidence:string; issue?:string; nonLabor:boolean };
 export type Person = { id:string; name:string; fileName:string; hash:string; days:Day[]; warnings:string[]; ocr:boolean; ocrReviewed:boolean; importedAt:string; pageCount:number; exceptions:Record<string,string>; corrections:Record<string,{cents:number;reason:string}> };
 export const normalize=(s:string)=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+export const currentMonth=()=>{const now=new Date();return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`};
 export const monthDays=(month:string)=>{const [y,m]=month.split('-').map(Number);return new Date(y,m,0).getDate()};
 export const weekDay=(month:string,day:number)=>{const [y,m]=month.split('-').map(Number);return new Date(y,m-1,day).getDay()};
+export const suggestedHolidays=(month:string):Record<string,string>=>{
+ const names:Record<string,string>={'01-01':'Confraternização Universal','04-21':'Tiradentes','05-01':'Dia Mundial do Trabalho','09-07':'Independência do Brasil','10-12':'Nossa Senhora Aparecida','11-02':'Finados','11-15':'Proclamação da República','11-20':'Dia Nacional de Zumbi e da Consciência Negra','12-25':'Natal'};
+ const prefix=month.slice(5);
+ return Object.fromEntries(Object.entries(names).filter(([date])=>date.startsWith(`${prefix}-`)).map(([date,name])=>[String(Number(date.slice(3))),name]));
+};
 export const hours=(cents:number)=>new Intl.NumberFormat('pt-BR',{maximumFractionDigits:2}).format(cents/100);
 export const toCents=(s:string)=>{if(!/^\d+(?:[.,]\d{1,2})?$/.test(s.trim()))return null; const n=Math.round(Number(s.replace(',','.'))*100);return Number.isSafeInteger(n)&&n>=0&&n<=2400?n:null};
 const weekdays:Record<string,number>={DOMINGO:0,SEGUNDA:1,LUNES:1,TERCA:2,MARTES:2,QUARTA:3,MIERCOLES:3,QUINTA:4,JUEVES:4,SEXTA:5,VIERNES:5,SABADO:6};
@@ -43,18 +49,21 @@ export function dayResult(p:Person,d:Day,month:string,holidays:Record<string,str
  const reason=exception||(weekend?'Fim de semana':uncertain?'Leitura a revisar':cents===800?'8 horas conferidas':cents===0?'Sem horas lançadas':cents!<800?'Abaixo de 8 horas':'Acima de 8 horas');
  return {cents,expected,status,reason,correction,weekend,exception};
 }
-export function summary(p:Person,month:string,holidays:Record<string,string>){
- const results=p.days.map(d=>dayResult(p,d,month,holidays));
+export type JiraDayAdjustment={hours:number;jiraHours:number};
+export function summary(p:Person,month:string,holidays:Record<string,string>,jiraAdjustments:Record<string,JiraDayAdjustment>={}){
+ const results=p.days.map(d=>{const result=dayResult(p,d,month,holidays);const adjustment=jiraAdjustments[String(d.day)];const covered=Boolean(adjustment&&result.cents!==null&&result.cents+adjustment.hours===adjustment.jiraHours);if(!covered||result.status!=='pending')return result;const expected=Math.max(0,result.expected-adjustment!.hours);return {...result,expected,status:result.cents===expected?'ok':'pending',reason:result.cents===expected?'8 horas conferidas':result.reason};});
  const pending=results.filter(x=>x.status==='pending').length;const review=results.filter(x=>x.status==='review').length;
- return {total:results.reduce((a,x)=>a+(x.cents??0),0),expected:results.reduce((a,x)=>a+x.expected,0),pending,review,ok:results.filter(x=>x.status==='ok').length,excluded:results.filter(x=>x.status==='excluded').length,status:review||p.warnings.length?'review':pending?'pending':'ok',missing:results.reduce((a,x)=>a+(x.status==='pending'?Math.max(0,x.expected-(x.cents??0)):0),0)};
+ return {total:results.reduce((a,x)=>a+(x.cents??0),0),expected:results.reduce((a,x)=>a+x.expected,0),pending,review,ok:results.filter(x=>x.status==='ok').length,excluded:results.filter(x=>x.status==='excluded').length,status:review||p.warnings.length?'review':pending?'pending':'ok',missing:results.reduce((a,x)=>a+(x.status==='pending'?Math.max(0,x.expected-(x.cents??0)):0),0),excess:results.reduce((a,x)=>a+(x.status==='pending'?Math.max(0,(x.cents??0)-x.expected):0),0)};
 }
 export function csvCell(v:unknown){const text=String(v??'');return '"'+(/^[=+\-@\t\r]/.test(text)?"'":'')+text.replace(/"/g,'""')+'"'}
 export function escapeHtml(v:unknown){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!))}
-export function validSession(x:unknown):x is {version:1;month:string;people:Person[];holidays:Record<string,string>;periodConfirmed:boolean}{
+export function validSession(x:unknown):x is {version:1;month:string;people:Person[];holidays:Record<string,string>;periodConfirmed:boolean;jiraPeople?:{name:string;days:Record<string,number>;issues:string[];justifications?:Record<string,'atestado'|'ferias'>;total:number}[];jiraFileName?:string}{
  if(!x||typeof x!=='object')return false;const v=x as Record<string,unknown>;
  if(v.version!==1||typeof v.month!=='string'||!/^20\d{2}-(0[1-9]|1[0-2])$/.test(v.month)||!Array.isArray(v.people)||v.people.length>200||typeof v.periodConfirmed!=='boolean')return false;
  const obj=(z:unknown)=>!!z&&typeof z==='object'&&!Array.isArray(z);
  const reasons=(z:unknown)=>obj(z)&&Object.entries(z as object).every(([k,a])=>/^([1-9]|[12]\d|3[01])$/.test(k)&&typeof a==='string'&&a.length<=1000);
  if(!reasons(v.holidays))return false;
+ if(v.jiraFileName!==undefined&&typeof v.jiraFileName!=='string')return false;
+ if(v.jiraPeople!==undefined&&(!Array.isArray(v.jiraPeople)||!v.jiraPeople.every(p=>obj(p)&&typeof p.name==='string'&&typeof p.total==='number'&&obj(p.days)&&Object.entries(p.days as object).every(([k,a])=>/^([1-9]|[12]\d|3[01])$/.test(k)&&Number.isInteger(a)&&a>=0)&&Array.isArray(p.issues)&&p.issues.every((issue:unknown)=>typeof issue==='string')&&(p.justifications===undefined||(obj(p.justifications)&&Object.entries(p.justifications as object).every(([k,a])=>/^([1-9]|[12]\d|3[01])$/.test(k)&&(a==='atestado'||a==='ferias')))))))return false;
  return v.people.every(p=>obj(p)&&['id','name','fileName','hash','importedAt'].every(k=>typeof p[k]==='string')&&typeof p.ocr==='boolean'&&typeof p.ocrReviewed==='boolean'&&Number.isInteger(p.pageCount)&&Array.isArray(p.warnings)&&p.warnings.every((w:unknown)=>typeof w==='string')&&reasons(p.exceptions)&&obj(p.corrections)&&Object.entries(p.corrections).every(([k,c])=>/^([1-9]|[12]\d|3[01])$/.test(k)&&obj(c)&&Number.isInteger((c as {cents:number}).cents)&&(c as {cents:number}).cents>=0&&(c as {cents:number}).cents<=2400&&typeof (c as {reason:string}).reason==='string')&&Array.isArray(p.days)&&p.days.length===monthDays(v.month as string)&&new Set(p.days.map((d:Day)=>d.day)).size===p.days.length&&p.days.every((d:Day)=>Number.isInteger(d.day)&&d.day>=1&&d.day<=monthDays(v.month as string)&&(d.cents===null||Number.isInteger(d.cents)&&d.cents>=0&&d.cents<=2400)&&typeof d.evidence==='string'&&Array.isArray(d.entries)&&d.entries.every(n=>Number.isInteger(n)&&n>=0&&n<=2400)&&typeof d.nonLabor==='boolean'&&(d.issue===undefined||typeof d.issue==='string')));
 }
