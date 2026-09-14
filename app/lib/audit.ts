@@ -1,0 +1,60 @@
+export type Day = { day:number; weekday:number; cents:number|null; entries:number[]; evidence:string; issue?:string; nonLabor:boolean };
+export type Person = { id:string; name:string; fileName:string; hash:string; days:Day[]; warnings:string[]; ocr:boolean; ocrReviewed:boolean; importedAt:string; pageCount:number; exceptions:Record<string,string>; corrections:Record<string,{cents:number;reason:string}> };
+export const normalize=(s:string)=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+export const monthDays=(month:string)=>{const [y,m]=month.split('-').map(Number);return new Date(y,m,0).getDate()};
+export const weekDay=(month:string,day:number)=>{const [y,m]=month.split('-').map(Number);return new Date(y,m-1,day).getDay()};
+export const hours=(cents:number)=>new Intl.NumberFormat('pt-BR',{maximumFractionDigits:2}).format(cents/100);
+export const toCents=(s:string)=>{if(!/^\d+(?:[.,]\d{1,2})?$/.test(s.trim()))return null; const n=Math.round(Number(s.replace(',','.'))*100);return Number.isSafeInteger(n)&&n>=0&&n<=2400?n:null};
+const weekdays:Record<string,number>={DOMINGO:0,SEGUNDA:1,LUNES:1,TERCA:2,MARTES:2,QUARTA:3,MIERCOLES:3,QUINTA:4,JUEVES:4,SEXTA:5,VIERNES:5,SABADO:6};
+export function parsePages(pages:string[],month:string){
+ const text=normalize(pages.join('\n'));
+ const markers=[...text.matchAll(/(?:^|\s)(\d{1,2})\s*(SEGUNDA|TERCA|QUARTA|QUINTA|SEXTA|SABADO|DOMINGO|LUNES|MARTES|MIERCOLES|JUEVES|VIERNES)(?:\s*-?\s*FEIRA)?/g)];
+ const days:Day[]=[];const warnings:string[]=[];
+ const numDays=monthDays(month);
+ if(!/IMPUTA|INPUTA|MPUTA|DEDICACIONES/.test(text))warnings.push('Cabeçalho do Dedicaciones não reconhecido. Confira o documento.');
+ const seen=new Set<number>();
+ for(let i=0;i<markers.length;i++){
+  const marker=markers[i],day=Number(marker[1]);
+  const evidence=text.slice(marker.index!+marker[0].length,i+1<markers.length?markers[i+1].index:text.length).trim();
+  if(day<1||day>numDays){warnings.push(`Dia ${day} fora do mês selecionado.`);continue;}
+  if(seen.has(day)){warnings.push(`Dia ${day} repetido no PDF. Verifique se há mais de um período.`);continue;}seen.add(day);
+  const matches=[...evidence.matchAll(/(?:^|\s)(\d+(?:[.,]\d+)?)\s+(SEM\s+(?:VALIDAR|IMPUTAR)|SIN\s+(?:VISAR|IMPUTAR)|VALIDAD[OA]S?|VISAD[OA]S?|APROVAD[OA]S?)(?![A-Z])/g)];
+  const statusCount=[...evidence.matchAll(/\b(?:SEM\s+(?:VALIDAR|IMPUTAR)|SIN\s+(?:VISAR|IMPUTAR)|VALIDAD[OA]S?|VISAD[OA]S?|APROVAD[OA]S?)\b/g)].length;
+  const nonLabor=/\b(?:NA[OG0] LABORAL|NO LABORABLE)\b/.test(evidence);
+  const entries=matches.map(m=>toCents(m[1]));
+  let cents:number|null=entries.length&&entries.every(x=>x!==null)?entries.reduce<number>((a,b)=>a+(b??0),0):nonLabor?0:null;
+  let issue:string|undefined;
+  if(statusCount!==matches.length||entries.some(x=>x===null)||(!entries.length&&!nonLabor)){cents=null;issue='Não foi possível ler todos os lançamentos deste dia.';}
+  if(cents!==null&&cents>2400){cents=null;issue='Total diário fora do intervalo esperado para leitura.';}
+  if(weekdays[marker[2]]!==weekDay(month,day)){issue='Dia da semana incompatível com o mês selecionado.';warnings.push('O calendário do PDF não corresponde ao mês selecionado.');}
+  if(i>0&&day<Number(markers[i-1][1]))warnings.push('A sequência de dias do PDF está fora de ordem.');
+  days.push({day,weekday:weekdays[marker[2]],cents,entries:entries.filter((x):x is number=>x!==null),evidence,issue,nonLabor});
+ }
+ for(let day=1;day<=numDays;day++)if(!seen.has(day))days.push({day,weekday:weekDay(month,day),cents:null,entries:[],evidence:'Dia não identificado no PDF.',issue:'Dia não identificado no PDF.',nonLabor:false});
+ if(seen.size!==numDays)warnings.push(`${seen.size} de ${numDays} dias reconhecidos. Os demais precisam de revisão.`);
+ if(pages.some(p=>p.trim().length<20))warnings.push('Uma ou mais páginas não puderam ser lidas.');
+ return {days:days.sort((a,b)=>a.day-b.day),warnings:[...new Set(warnings)]};
+}
+export function dayResult(p:Person,d:Day,month:string,holidays:Record<string,string>){
+ const exception=p.exceptions[d.day]||holidays[d.day];const weekend=[0,6].includes(weekDay(month,d.day));const correction=p.corrections[d.day];const cents=correction?.cents??d.cents;
+ const expected=exception||weekend?0:800;
+ const uncertain=(!correction&&(cents===null||!!d.issue))||(p.ocr&&!p.ocrReviewed);
+ const status=uncertain?'review':exception||weekend?'excluded':cents===800?'ok':'pending';
+ const reason=exception||(weekend?'Fim de semana':uncertain?'Leitura a revisar':cents===800?'8 horas conferidas':cents===0?'Sem horas lançadas':cents!<800?'Abaixo de 8 horas':'Acima de 8 horas');
+ return {cents,expected,status,reason,correction,weekend,exception};
+}
+export function summary(p:Person,month:string,holidays:Record<string,string>){
+ const results=p.days.map(d=>dayResult(p,d,month,holidays));
+ const pending=results.filter(x=>x.status==='pending').length;const review=results.filter(x=>x.status==='review').length;
+ return {total:results.reduce((a,x)=>a+(x.cents??0),0),expected:results.reduce((a,x)=>a+x.expected,0),pending,review,ok:results.filter(x=>x.status==='ok').length,excluded:results.filter(x=>x.status==='excluded').length,status:review||p.warnings.length?'review':pending?'pending':'ok',missing:results.reduce((a,x)=>a+(x.status==='pending'?Math.max(0,x.expected-(x.cents??0)):0),0)};
+}
+export function csvCell(v:unknown){const text=String(v??'');return '"'+(/^[=+\-@\t\r]/.test(text)?"'":'')+text.replace(/"/g,'""')+'"'}
+export function escapeHtml(v:unknown){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!))}
+export function validSession(x:unknown):x is {version:1;month:string;people:Person[];holidays:Record<string,string>;periodConfirmed:boolean}{
+ if(!x||typeof x!=='object')return false;const v=x as Record<string,unknown>;
+ if(v.version!==1||typeof v.month!=='string'||!/^20\d{2}-(0[1-9]|1[0-2])$/.test(v.month)||!Array.isArray(v.people)||v.people.length>200||typeof v.periodConfirmed!=='boolean')return false;
+ const obj=(z:unknown)=>!!z&&typeof z==='object'&&!Array.isArray(z);
+ const reasons=(z:unknown)=>obj(z)&&Object.entries(z as object).every(([k,a])=>/^([1-9]|[12]\d|3[01])$/.test(k)&&typeof a==='string'&&a.length<=1000);
+ if(!reasons(v.holidays))return false;
+ return v.people.every(p=>obj(p)&&['id','name','fileName','hash','importedAt'].every(k=>typeof p[k]==='string')&&typeof p.ocr==='boolean'&&typeof p.ocrReviewed==='boolean'&&Number.isInteger(p.pageCount)&&Array.isArray(p.warnings)&&p.warnings.every((w:unknown)=>typeof w==='string')&&reasons(p.exceptions)&&obj(p.corrections)&&Object.entries(p.corrections).every(([k,c])=>/^([1-9]|[12]\d|3[01])$/.test(k)&&obj(c)&&Number.isInteger((c as {cents:number}).cents)&&(c as {cents:number}).cents>=0&&(c as {cents:number}).cents<=2400&&typeof (c as {reason:string}).reason==='string')&&Array.isArray(p.days)&&p.days.length===monthDays(v.month as string)&&new Set(p.days.map((d:Day)=>d.day)).size===p.days.length&&p.days.every((d:Day)=>Number.isInteger(d.day)&&d.day>=1&&d.day<=monthDays(v.month as string)&&(d.cents===null||Number.isInteger(d.cents)&&d.cents>=0&&d.cents<=2400)&&typeof d.evidence==='string'&&Array.isArray(d.entries)&&d.entries.every(n=>Number.isInteger(n)&&n>=0&&n<=2400)&&typeof d.nonLabor==='boolean'&&(d.issue===undefined||typeof d.issue==='string')));
+}
